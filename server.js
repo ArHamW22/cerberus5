@@ -22,6 +22,9 @@ function broadcast(obj) {
     }
 }
 
+// Track presence per job: jobId -> Map of username -> true
+const jobPresence = {};
+
 wss.on('connection', ws => {
     let _username = null;
     let _jobId    = null;
@@ -34,6 +37,19 @@ wss.on('connection', ws => {
         if (msg.type === 'presence_join' && msg.username && msg.job_id) {
             _username = msg.username;
             _jobId    = msg.job_id;
+
+            // Send all existing users in this job back to the new joiner
+            if (jobPresence[_jobId]) {
+                for (const existingUser of jobPresence[_jobId]) {
+                    if (existingUser !== _username) {
+                        ws.send(JSON.stringify({ type: 'presence_join', username: existingUser, job_id: _jobId }));
+                    }
+                }
+            }
+
+            // Register and broadcast to everyone else
+            if (!jobPresence[_jobId]) jobPresence[_jobId] = new Set();
+            jobPresence[_jobId].add(_username);
             broadcast({ type: 'presence_join', username: _username, job_id: _jobId });
             return;
         }
@@ -43,6 +59,10 @@ wss.on('connection', ws => {
 
     ws.on('close', () => {
         if (_username && _jobId) {
+            if (jobPresence[_jobId]) {
+                jobPresence[_jobId].delete(_username);
+                if (jobPresence[_jobId].size === 0) delete jobPresence[_jobId];
+            }
             broadcast({ type: 'presence_leave', username: _username, job_id: _jobId });
         }
     });
